@@ -1,0 +1,9 @@
+# Isolated parallel agent worktrees (each points to its own branch)
+.worktrees/
+
+# Dependencies & build output
+node_modules/
+.next/
+out/
+dist/
+.env*.local
