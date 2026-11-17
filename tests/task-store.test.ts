@@ -6,19 +6,42 @@ import path from 'node:path';
 
 import {
   createTask,
+  deleteTask,
   listTasks,
+  TaskNotFoundError,
   TaskStorageError,
+  updateTask,
   ValidationError,
 } from '../src/features/tasks/dal/task-store.ts';
-import type { CreateTaskInput } from '../src/features/tasks/types.ts';
+import type {
+  CreateTaskInput,
+  TaskStatus,
+  UpdateTaskInput,
+} from '../src/features/tasks/types.ts';
 
 const UUID_V4_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ISO_8601_UTC_REGEX =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
 
-const asInvalidCreateInput = (value: unknown): CreateTaskInput =>
-  value as CreateTaskInput;
+const asInvalid = <T>(value: unknown): T => value as T;
+
+const expectTaskNotFound = async (
+  operation: () => Promise<unknown>,
+): Promise<void> =>
+  assert.rejects(operation, (error: unknown) => {
+    assert.ok(error instanceof TaskNotFoundError);
+    assert.equal(error.message, 'Task not found.');
+    return true;
+  });
+
+const expectValidationError = async (
+  operation: () => Promise<unknown>,
+): Promise<void> =>
+  assert.rejects(
+    operation,
+    (error: unknown) => error instanceof ValidationError,
+  );
 
 describe('task-store DAL', () => {
   let originalCwd = '';
@@ -124,11 +147,11 @@ describe('task-store DAL', () => {
       { title: '' },
       { title: '    \t\n  ' },
       { title: 'a'.repeat(121) },
-      asInvalidCreateInput({ title: 42 }),
-      asInvalidCreateInput({ title: null }),
-      asInvalidCreateInput({}),
-      asInvalidCreateInput(null),
-      asInvalidCreateInput('raw string payload'),
+      asInvalid<CreateTaskInput>({ title: 42 }),
+      asInvalid<CreateTaskInput>({ title: null }),
+      asInvalid<CreateTaskInput>({}),
+      asInvalid<CreateTaskInput>(null),
+      asInvalid<CreateTaskInput>('raw string payload'),
     ];
 
     for (const invalid of invalidInputs) {
@@ -178,5 +201,93 @@ describe('task-store DAL', () => {
         return true;
       },
     );
+  });
+
+  it('updateTask updates title, status transitions, or both and persists defensive copies', async () => {
+    const created = await createTask({ title: 'Initial task' });
+    assert.equal(created.status, 'todo');
+
+    const inProgress = await updateTask(created.id, { status: 'in_progress' });
+    assert.equal(inProgress.status, 'in_progress');
+    assert.equal(inProgress.title, 'Initial task');
+    assert.equal(inProgress.id, created.id);
+    assert.equal(inProgress.createdAt, created.createdAt);
+
+    const retitled = await updateTask(created.id, { title: '  Refined task  ' });
+    assert.equal(retitled.title, 'Refined task');
+    assert.equal(retitled.status, 'in_progress');
+
+    const completed = await updateTask(created.id, {
+      title: '  Shipped task  ',
+      status: 'done',
+    });
+    assert.equal(completed.title, 'Shipped task');
+    assert.equal(completed.status, 'done');
+
+    // Mutating the returned object must not affect stored state.
+    completed.title = 'Mutated caller copy';
+    const listed = await listTasks();
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].title, 'Shipped task');
+    assert.equal(listed[0].status, 'done');
+  });
+
+  it('updateTask throws ValidationError on empty id, empty update, invalid status, or bad title', async () => {
+    const created = await createTask({ title: 'Stable task' });
+
+    for (const invalidId of ['', '   ', asInvalid<string>(123)]) {
+      await expectValidationError(() => updateTask(invalidId, { status: 'done' }));
+    }
+
+    const invalidUpdates: readonly UpdateTaskInput[] = [
+      {},
+      { title: undefined, status: undefined },
+      asInvalid<UpdateTaskInput>(null),
+      { status: asInvalid<TaskStatus>('archived') },
+      { title: '' },
+      { title: '   \t\n  ' },
+      { title: 'x'.repeat(121) },
+      { title: asInvalid<string>(42) },
+    ];
+
+    for (const invalidInput of invalidUpdates) {
+      await expectValidationError(() => updateTask(created.id, invalidInput));
+    }
+
+    const listed = await listTasks();
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].title, 'Stable task');
+    assert.equal(listed[0].status, 'todo');
+  });
+
+  it('updateTask and deleteTask throw TaskNotFoundError for missing IDs and ValidationError for empty delete id', async () => {
+    await createTask({ title: 'Only task' });
+
+    await expectTaskNotFound(() => updateTask('non-existent-id', { status: 'done' }));
+    await expectTaskNotFound(() => deleteTask('non-existent-id'));
+
+    for (const invalidId of ['', '   ', asInvalid<string>(null)]) {
+      await expectValidationError(() => deleteTask(invalidId));
+    }
+  });
+
+  it('deleteTask removes only the requested task and persists remaining tasks', async () => {
+    const first = await createTask({ title: 'First task' });
+    const second = await createTask({ title: 'Second task' });
+    const third = await createTask({ title: 'Third task' });
+
+    const deleted = await deleteTask(second.id);
+    assert.deepEqual(deleted, { id: second.id });
+
+    const remaining = await listTasks();
+    assert.deepEqual(
+      remaining.map((task) => ({ id: task.id, title: task.title })),
+      [
+        { id: first.id, title: 'First task' },
+        { id: third.id, title: 'Third task' },
+      ],
+    );
+
+    await expectTaskNotFound(() => deleteTask(second.id));
   });
 });
