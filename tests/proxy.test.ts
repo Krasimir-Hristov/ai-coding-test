@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { scrubIncomingHeaders } from '../src/proxy.ts';
+import { NextRequest } from 'next/server.js';
+import { proxy, scrubIncomingHeaders } from '../src/proxy.ts';
 
 describe('scrubIncomingHeaders', () => {
   it('removes x-middleware-subrequest to mitigate CVE-2025-29927', () => {
@@ -118,5 +119,67 @@ describe('scrubIncomingHeaders', () => {
     assert.equal(sanitized.get('accept'), 'application/json, text/plain');
     assert.equal(sanitized.has('x-forwarded-for'), false);
     assert.equal(incoming.get('x-forwarded-for'), '192.0.2.1, 192.0.2.2');
+  });
+});
+
+describe('proxy', () => {
+  it('exports a Next.js proxy handler that forwards scrubbed request headers via NextResponse.next', () => {
+    assert.equal(typeof proxy, 'function');
+
+    const request = new NextRequest('http://localhost:3000/api/tasks', {
+      headers: new Headers({
+        'x-middleware-subrequest': 'src/middleware:src/middleware',
+        'X-Forwarded-For': '203.0.113.10',
+        'x-Custom-Debug': '1',
+        authorization: 'Bearer proxy-token',
+        'content-type': 'application/json',
+        accept: 'application/json',
+      }),
+    });
+
+    const response = proxy(request);
+
+    assert.equal(response.headers.get('x-middleware-next'), '1');
+    assert.equal(
+      response.headers.get('x-middleware-request-authorization'),
+      'Bearer proxy-token',
+    );
+    assert.equal(
+      response.headers.get('x-middleware-request-content-type'),
+      'application/json',
+    );
+    assert.equal(
+      response.headers.get('x-middleware-request-accept'),
+      'application/json',
+    );
+    assert.equal(
+      response.headers.get('x-middleware-request-x-middleware-subrequest'),
+      null,
+    );
+    assert.equal(
+      response.headers.get('x-middleware-request-x-forwarded-for'),
+      null,
+    );
+    assert.equal(
+      response.headers.get('x-middleware-request-x-custom-debug'),
+      null,
+    );
+
+    const overrideHeaders = (
+      response.headers.get('x-middleware-override-headers') ?? ''
+    )
+      .split(',')
+      .map((header) => header.trim())
+      .filter(Boolean);
+
+    assert.deepEqual(overrideHeaders.sort(), [
+      'accept',
+      'authorization',
+      'content-type',
+    ]);
+    assert.equal(
+      request.headers.get('x-middleware-subrequest'),
+      'src/middleware:src/middleware',
+    );
   });
 });
