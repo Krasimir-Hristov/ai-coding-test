@@ -4,14 +4,14 @@
 Never edit files outside your assigned directory.
 
 - **Supervisor (`main` — root folder):**
-  - Owns `AGENTS.md`, `CONTRACTS.md`, `src/features/tasks/types.ts`, `src/proxy.ts`, `package.json`, `tsconfig.json`.
+  - Owns `AGENTS.md`, `CONTRACTS.md`, `ROADMAP.md`, `src/features/tasks/types.ts`, `src/proxy.ts`, `src/app/layout.tsx`, `src/app/globals.css`, `next.config.ts`, `postcss.config.mjs`, `package.json`, `package-lock.json`, `tsconfig.json`.
   - Reviews diffs, merges branches sequentially into `main`, and coordinates conflict resolution.
 - **Backend Agent (`.worktrees/backend` on branch `feat/backend`):**
   - Owns `src/features/tasks/dal/` and `src/app/api/tasks/`.
   - Must NOT edit UI components, pages, or tests.
 - **Frontend Agent (`.worktrees/frontend` on branch `feat/frontend`):**
-  - Owns `src/features/tasks/components/` and `src/app/` UI pages/layouts.
-  - Must NOT edit DAL files, API routes, or tests.
+  - Owns `src/features/tasks/components/`, `src/features/tasks/index.ts`, and `src/app/page.tsx`.
+  - Must NOT edit `layout.tsx`, `globals.css`, DAL files, API routes, or tests.
 - **Unit Tester Agent (`.worktrees/tester` on branch `test/unit`):**
   - Owns `tests/`.
   - Writes and runs unit/integration tests ONLY when explicitly triggered by the user or Supervisor after contract/integration steps.

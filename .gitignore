@@ -1,9 +1,13 @@
 # Isolated parallel agent worktrees (each points to its own branch)
 .worktrees/
 
+# Runtime task data created during local runs/tests
+data/*.json
+
 # Dependencies & build output
 node_modules/
 .next/
+next-env.d.ts
 out/
 dist/
 .env*.local
